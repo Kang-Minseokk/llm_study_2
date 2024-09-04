@@ -4,12 +4,11 @@ from huggingface_hub import login
 from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig, pipeline
 import torch
 from time import time
-from langchain_huggingface import HuggingFacePipeline
-from langchain.document_loaders import TextLoader
+from langchain_huggingface import HuggingFacePipeline, HuggingFaceEmbeddings
+from langchain_community.document_loaders import TextLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.chains import RetrievalQA
-from langchain.vectorstores import Chroma
+from langchain_community.vectorstores import Chroma
 
 model_id = "google/gemma-2-2b-it"
 login(token="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")
@@ -91,19 +90,92 @@ def test_model(tokenizer, pipeline, prompt_to_test):
 #            "State of Union이 무엇인지 설명해주세요. 간단히 정의하세요. 100단어 이내로 작성하세요.")
 
 
-# 시스템 프롬포트를 활용해서 파이프라인 테스트하기
+# # 시스템 프롬포트를 활용해서 파이프라인 테스트하기
+# system_prompt="1. 이모티콘을 사용하지 말것, 2.reference 주소를 삭제할 것, 3. 공적인 언어를 사용할 것"
+# user_query="State of the Union이 무엇인지 설명해주세요. 간단히 정의하세요. 100단어 이내로 작성하세요."
+# full_query=f"""
+# <start_of_turn>user
+# {system_prompt}
+# {user_query}<end_of_turn>
+# <start_of_turn>model"""
+#
+# test_model(tokenizer, query_pipeline, full_query)
+
+
+
+# RAG 구축
 system_prompt="1. 이모티콘을 사용하지 말것, 2.reference 주소를 삭제할 것, 3. 공적인 언어를 사용할 것"
-user_query="State of the Union이 무엇인지 설명해주세요. 간단히 정의하세요. 100단어 이내로 작성하세요."
-full_query=f"""
+llm = HuggingFacePipeline(pipeline=query_pipeline)
+user_query = "State of Union이 무엇인지 설명해주세요. 간단히 정의하세요. 100단어 이내로 작성하세요."
+full_query = f"""
+<start_of_turn>user
+{system_prompt}
+{user_query}<end_of_turn>
+<start_of_turn>model"""
+output = llm.invoke(input=full_query)
+print(output)
+
+
+
+# Text Loader을 활용한 데이터 수집
+loader = TextLoader('source/biden_sotu_2023.txt', encoding = "utf-8")
+documents = loader.load()
+
+# 청킹을 사용해서 텍스트 데이터 분할하기
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=20)
+all_splits = text_splitter.split_documents(documents)
+
+model_name = "sentence-transformers/all-mpnet-base-v2"
+model_kwargs = {"device": "mps"}
+
+embeddings = HuggingFaceEmbeddings(model_name=model_name)
+
+vectordb = Chroma(embedding_function=embeddings, persist_directory="chroma_db")
+vectordb.add_documents(documents=all_splits)
+
+# 검색기 생성
+retriever = vectordb.as_retriever()
+
+qa = RetrievalQA.from_chain_type(
+    llm=llm, # 사용할 언어모델
+    chain_type="stuff", # 모든 관련 문서를 하나의 컨텍스트로 결합.
+    retriever=retriever,
+    verbose=True,
+)
+
+
+def test_rag(qa, query):
+    """
+    RAG 시스템을 테스트하는 함수
+    :param qa:
+    :param query:
+    :return:
+    """
+    print(f"Query: {query}\n")
+    time_1 = time()
+    result = qa.run(query)
+    time_2 = time()
+    print("Time inference: ", round(time_2 - time_1, 3), "sec.")
+    print(f"Result: {result}")
+
+
+user_query = "2023년 State of the Union의 주요 주제는 무엇이었나요? 요약하세요. 200단어 이내로 작성하세요"
+
+full_query = f"""
 <start_of_turn>user
 {system_prompt}
 {user_query}<end_of_turn>
 <start_of_turn>model"""
 
-test_model(tokenizer, query_pipeline, full_query)
+test_rag(qa, user_query)
 
 
+# 문서 출처
+docs = vectordb.similarity_search(user_query)
+print(f"Query: {user_query}\n")
+print(f"Retrieved documents: {len(docs)}")
 
-# RAG 구축
-llm = HuggingFacePipeline(pipeline=query_pipeline)
-
+for doc in docs:
+    doc_details = doc.to_json()['kwargs']
+    print("Source:", doc_details['metadata']['source'])
+    print("Text:", doc_details['page_content'], '\n')
