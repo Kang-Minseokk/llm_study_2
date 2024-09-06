@@ -1,0 +1,20 @@
+Metadata-Version: 2.1
+Name: langchain-teddynote
+Version: 0.0.28
+Summary: LangChain Helper Library
+Home-page: https://github.com/teddylee777/langchain-teddynote
+Author: Teddy Lee
+Author-email: teddylee777@gmail.com
+Keywords: langchain,teddynote
+Classifier: Programming Language :: Python :: 3
+Requires-Python: >=3.10
+License-File: LICENSE
+Requires-Dist: langchain
+Requires-Dist: kiwipiepy
+Requires-Dist: konlpy
+Requires-Dist: rank-bm25
+Requires-Dist: pinecone-client[grpc]
+Requires-Dist: pinecone-text
+Requires-Dist: olefile
+Requires-Dist: pdf2image
+
